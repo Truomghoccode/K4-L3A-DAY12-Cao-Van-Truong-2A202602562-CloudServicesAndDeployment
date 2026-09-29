@@ -8,16 +8,7 @@ kể cả khi có thảo luận cách tiếp cận với học viên khác.
 ## Tên repository
 
 Tên repo bắt buộc theo mẫu:
-
-```text
-K4-L3A-DAY12-<HoVaTen>-<MSSV>-<TenBai>
-```
-
-Với bài lab này, dùng `TenBai` là `CloudServicesAndDeployment`:
-
-```text
-K4-L3A-DAY12-NguyenVanAn-L3A202600280-CloudServicesAndDeployment
-```
+K4-L3A-DAY12-Cao-Van-Truong-2A202602562-CloudServicesAndDeployment
 
 Quy tắc đặt tên:
 
