@@ -20,15 +20,38 @@
 # Build thử: docker build -t day12-agent:prod .
 #            docker images day12-agent:prod     # xem dung lượng
 # ═══════════════════════════════════════════════════════════════════
-
-FROM python:3.11
-
+# Builder
+# Sử dụng -slim để giảm dung lượng image thay vì không phải lưu chứa sẵn toàn bộ bộ biên dịch GCC, 
+# build tools, tài liệu hệ thống 
+FROM python:3.11-slim AS builder 
 WORKDIR /app
 
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --default-timeout=100 -r requirements.txt
+
+# Runtime
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+# Copy thư viện đã cài từ builder stage
+COPY --from=builder /opt/venv /opt/venv
+# Tạo non-root user vì lý do bảo mật
+RUN useradd -m -u 1000 appuser
+# Copy mã nguồn ứng dụng
 COPY . .
-
-RUN pip install -r requirements.txt
-
+# Chuyển quyền thực thi sang non-root user
+USER appuser
 EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Healthcheck định kỳ kiểm tra endpoint /health (dùng python urllib để không cần cài thêm curl)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request, os; port = os.environ.get('PORT', '8000'); urllib.request.urlopen(f'http://localhost:{port}/health')" || exit 1
+# Đọc PORT động từ biến môi trường (fallback về 8000 nếu không có)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

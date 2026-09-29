@@ -87,22 +87,26 @@ def health():
     lời câu hỏi "có cần restart container này không?". Nếu nó phụ thuộc
     Redis, Redis chết một nhịp là cả cụm container bị restart theo.
     """
-    raise NotImplementedError("TODO (CP1/CP4): cài đặt /health")
+    if lifecycle.shutting_down: #kiểm tra đang shutdown không
+        return JSONResponse(
+            status_code=503, content={"status": "shutting_down"}) #nếu có thì trả về 503
+    return {"status": "ok", "service": SERVICE_NAME, "version": SERVICE_VERSION} #Bình thường thì trả về 200
+
 
 
 @app.get("/ready")
 def ready(store: ConversationStore = Depends(get_store)):
-    """Readiness probe — đã sẵn sàng nhận traffic chưa?
+    """Readiness probe — đã sẵn sàng nhận traffic chưa?"""
+    if lifecycle.shutting_down:
+        return JSONResponse(
+            status_code=503, content={"status": "shutting_down"}
+        )
+    if not store.ping():
+        return JSONResponse(
+            status_code=503, content={"status": "not ready", "redis": False}
+        )
+    return {"status": "ready", "redis": True}
 
-    TODO (CP4):
-      - Đang tắt dần → 503 ``{"status": "shutting_down"}``
-      - ``store.ping()`` False → 503 ``{"status": "not ready", "redis": False}``
-      - Ngược lại → ``{"status": "ready", "redis": True}``
-
-    Khác /health ở chỗ: endpoint này ĐƯỢC PHÉP kiểm tra dependency. Load
-    balancer dùng nó để quyết định có đẩy request vào instance này không.
-    """
-    raise NotImplementedError("TODO (CP4): cài đặt /ready")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -145,7 +149,31 @@ def ask(
     ``user_id`` do ``verify_api_key`` trả về, nên request không có API key
     hợp lệ sẽ dừng ở 401 trước khi chạm vào bất cứ dòng nào ở đây.
     """
-    raise NotImplementedError("TODO (CP3/CP4): cài đặt /ask")
+    # 1. Rate limit — chặn trước khi gọi LLM
+    limiter.check(user_id)
+    # 2. Cost guard — kiểm tra ngân sách của user
+    guard.check(user_id)
+    # 3. Lấy lịch sử hội thoại
+    history = store.get_history(user_id)
+    # 4. Gọi LLM
+    result = ask_llm(payload.question, history)
+    # 5. Lưu lịch sử
+    store.append(user_id, "user", payload.question)
+    store.append(user_id, "assistant", result["answer"])
+    # 6. Ghi nhận chi phí
+    guard.record(user_id, result["cost_usd"])
+    # 7. Log
+    log_event("ask_completed", user_id=user_id,
+              tokens_in=result["tokens_in"], tokens_out=result["tokens_out"],
+              cost_usd=result["cost_usd"])
+    # 8. Trả kết quả
+    return {
+        "answer": result["answer"],
+        "user_id": user_id,
+        "history_length": len(history),
+        "cost_usd": result["cost_usd"],
+        "tokens": {"in": result["tokens_in"], "out": result["tokens_out"]},
+    }
 
 
 if __name__ == "__main__":
